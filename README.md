@@ -1,12 +1,15 @@
 # Modern Data Warehouse Project
 # モダンデータウェアハウスプロジェクト
 
-## 1. Data Architecture データアーキテクチャ
+## 1. Data Architecture
+## 1. データアーキテクチャ
 
 This project implements a modern data warehouse using the **Medallion Architecture**, consisting of three data layers.
+
 本プロジェクトでは、3つのデータレイヤーで構成される**メダリオンアーキテクチャ（Medallion Architecture）**を採用し、モダンデータウェアハウスを構築します。
 
-### 1.1 Bronze Layer ブロンズレイヤー
+### 1.1 Bronze Layer
+### 1.1 ブロンズレイヤー
 
 Stores raw data exactly as received from source systems. Data is ingested from ERP and CRM CSV files into SQL Server without applying data transformations.
 
