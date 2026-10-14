@@ -78,7 +78,7 @@ Analyze sales patterns and trends to support business performance evaluation and
 The repository is organized into datasets, documentation, SQL scripts, and testing resources.
 
 ```text
-data-warehouse-project/
+sql-data-warehouse/
 │
 ├── datasets/
 │   ├── source_crm/                     # CRM source datasets
