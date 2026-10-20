@@ -17,7 +17,7 @@ WARNING:
 =============================================================
 */
 
-DROP DATABASE IF EXISTS datawarehouse WITH (FORCE);
+DROP DATABASE IF EXISTS sales_datawarehouse WITH (FORCE);
 CREATE DATABASE sales_datawarehouse;
 
 
