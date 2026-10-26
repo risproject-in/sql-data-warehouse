@@ -123,7 +123,7 @@ Gunakan garis miring `/` pada path Windows agar path dapat dibaca dengan aman ol
 PostgreSQL.
 
 ```sql
-\copy bronze.crm_cust_info (cst_id, cst_key, cst_firstname, cst_lastname, cst_marital_status, cst_gndr, cst_create_date) FROM 'D:/Acceleration/datasets/source_crm/cust_info.csv' WITH (FORMAT CSV, HEADER TRUE, DELIMITER ',', QUOTE '"', ENCODING 'UTF8');
+\copy bronze.crm_cust_info (cst_id, cst_key, cst_firstname, cst_lastname, cst_material_status, cst_gndr, cst_create_date) FROM 'D:/Acceleration/datasets/source_crm/cust_info.csv' WITH (FORMAT CSV, HEADER TRUE, DELIMITER ',', QUOTE '"', ENCODING 'UTF8');
 ```
 
 Keterangan:
@@ -490,3 +490,116 @@ GOLD — STAR SCHEMA
 4. Semua data sumber pertama kali disimpan apa adanya di Bronze Layer.
 5. Data dibersihkan dan divalidasi di Silver Layer.
 6. Data yang telah siap dianalisis dibentuk menjadi fact dan dimension pada Gold Layer.
+
+---
+
+## Bulk Import Data CSV ke Bronze Layer
+
+Perintah berikut digunakan untuk memasukkan enam file CSV ke tabel Bronze Layer.
+Jalankan perintah melalui terminal `psql` yang sudah terhubung ke database
+`sales_datawarehouse`.
+
+```bash
+psql -U postgres -d sales_datawarehouse
+```
+
+Perintah `\copy` ditulis dalam satu baris. Path Windows menggunakan `/` agar dapat
+dibaca dengan aman oleh PostgreSQL.
+
+### Data CRM
+
+#### `cust_info.csv`
+
+```sql
+\copy bronze.crm_cust_info (cst_id, cst_key, cst_firstname, cst_lastname, cst_material_status, cst_gndr, cst_create_date) FROM 'D:/Acceleration/datasets/source_crm/cust_info.csv' WITH (FORMAT CSV, HEADER TRUE, DELIMITER ',', QUOTE '"', ENCODING 'UTF8');
+```
+
+> Header file menggunakan `cst_marital_status`, sedangkan tabel Bronze menggunakan
+> `cst_material_status`. Import tetap dapat dilakukan karena pemetaan menggunakan
+> urutan kolom yang ditentukan pada perintah `\copy`.
+
+#### `prd.info.csv`
+
+```sql
+\copy bronze.crm_prd_info (prd_id, prd_key, prd_nm, prd_cost, prd_line, prd_start_dt, prd_end_dt) FROM 'D:/Acceleration/datasets/source_crm/prd.info.csv' WITH (FORMAT CSV, HEADER TRUE, DELIMITER ',', QUOTE '"', ENCODING 'UTF8');
+```
+
+#### `sales_details.csv`
+
+```sql
+\copy bronze.crm_sales_details (sls_ord_num, sls_prd_key, sls_cust_id, sls_order_dt, sls_ship_dt, sls_due_dt, sls_sales, sls_quantity, sls_price) FROM 'D:/Acceleration/datasets/source_crm/sales_details.csv' WITH (FORMAT CSV, HEADER TRUE, DELIMITER ',', QUOTE '"', ENCODING 'UTF8');
+```
+
+### Data ERP
+
+File ERP diasumsikan berada pada folder:
+
+```text
+D:/Acceleration/datasets/source_erp/
+```
+
+Jika lokasi sebenarnya berbeda, sesuaikan path pada setiap perintah.
+
+#### `CUST_AZ12.csv`
+
+```sql
+\copy bronze.erp_cust_az12 (cid, bdate, gen) FROM 'D:/Acceleration/datasets/source_erp/CUST_AZ12.csv' WITH (FORMAT CSV, HEADER TRUE, DELIMITER ',', QUOTE '"', ENCODING 'UTF8');
+```
+
+#### `LOC_A101.csv`
+
+```sql
+\copy bronze.erp_loc_a101 (cid, cntry) FROM 'D:/Acceleration/datasets/source_erp/LOC_A101.csv' WITH (FORMAT CSV, HEADER TRUE, DELIMITER ',', QUOTE '"', ENCODING 'UTF8');
+```
+
+#### `PX_CAT_G1V2.csv`
+
+```sql
+\copy bronze.erp_px_cat_g1v2 (id, cat, subcat, maintenance) FROM 'D:/Acceleration/datasets/source_erp/PX_CAT_G1V2.csv' WITH (FORMAT CSV, HEADER TRUE, DELIMITER ',', QUOTE '"', ENCODING 'UTF8');
+```
+
+### Verifikasi Jumlah Data
+
+Setelah seluruh proses import selesai, jalankan query berikut untuk membandingkan
+jumlah baris pada setiap tabel Bronze:
+
+```sql
+SELECT 'crm_cust_info' AS table_name, COUNT(*) AS total_rows
+FROM bronze.crm_cust_info
+
+UNION ALL
+
+SELECT 'crm_prd_info', COUNT(*)
+FROM bronze.crm_prd_info
+
+UNION ALL
+
+SELECT 'crm_sales_details', COUNT(*)
+FROM bronze.crm_sales_details
+
+UNION ALL
+
+SELECT 'erp_cust_az12', COUNT(*)
+FROM bronze.erp_cust_az12
+
+UNION ALL
+
+SELECT 'erp_loc_a101', COUNT(*)
+FROM bronze.erp_loc_a101
+
+UNION ALL
+
+SELECT 'erp_px_cat_g1v2', COUNT(*)
+FROM bronze.erp_px_cat_g1v2;
+```
+
+### Verifikasi Sampel Data
+
+```sql
+SELECT * FROM bronze.crm_cust_info LIMIT 5;
+SELECT * FROM bronze.crm_prd_info LIMIT 5;
+SELECT * FROM bronze.crm_sales_details LIMIT 5;
+SELECT * FROM bronze.erp_cust_az12 LIMIT 5;
+SELECT * FROM bronze.erp_loc_a101 LIMIT 5;
+SELECT * FROM bronze.erp_px_cat_g1v2 LIMIT 5;
+```
