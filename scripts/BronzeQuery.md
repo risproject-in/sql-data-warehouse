@@ -113,44 +113,6 @@ silver.customer_clean
 gold.dim_customer
 ```
 
-### Bulk Import Data dari CSV
-
-Perintah berikut digunakan untuk memasukkan data customer dari file CSV ke tabel
-`bronze.crm_cust_info`. Perintah `\copy` dijalankan melalui terminal `psql` yang sudah
-terhubung ke database `sales_datawarehouse`.
-
-Gunakan garis miring `/` pada path Windows agar path dapat dibaca dengan aman oleh
-PostgreSQL.
-
-```sql
-\copy bronze.crm_cust_info (cst_id, cst_key, cst_firstname, cst_lastname, cst_material_status, cst_gndr, cst_create_date) FROM 'D:/Acceleration/datasets/source_crm/cust_info.csv' WITH (FORMAT CSV, HEADER TRUE, DELIMITER ',', QUOTE '"', ENCODING 'UTF8');
-```
-
-Keterangan:
-
-- `bronze.crm_cust_info` adalah tabel tujuan.
-- Daftar kolom menentukan urutan pemetaan kolom CSV ke tabel PostgreSQL.
-- `HEADER TRUE` menunjukkan bahwa baris pertama file berisi nama kolom.
-- `FORMAT CSV` menunjukkan format file sumber adalah CSV.
-- `DELIMITER ','` menunjukkan pemisah antar kolom adalah koma.
-- `QUOTE '"'` menentukan karakter pembungkus nilai teks.
-- `ENCODING 'UTF8'` menentukan encoding file sumber.
-
-Setelah import selesai, verifikasi jumlah dan isi data:
-
-```sql
-SELECT COUNT(*) AS total_customer
-FROM bronze.crm_cust_info;
-```
-
-```sql
-SELECT *
-FROM bronze.crm_cust_info
-LIMIT 10;
-```
-
----
-
 ## 2. `bronze.crm_sales_details`
 
 ### Fungsi
