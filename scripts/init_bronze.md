@@ -1,9 +1,9 @@
-# Inisialisasi Bronze Layer — PostgreSQL
+# Inisialisasi Bronze Layer - PostgreSQL
 
 Dokumen ini berisi langkah awal untuk membuat database `sales_datawarehouse`,
 schema Medallion, dan enam tabel pada Bronze Layer.
 
-## Arsitektur
+## Arsitekturhttps://github.com/risproject-in/sql-data-warehouse/tree/main/scripts
 
 ```text
 Bronze → Silver → Gold
