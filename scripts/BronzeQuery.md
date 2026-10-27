@@ -1,4 +1,4 @@
-# Bronze Layer — Query PostgreSQL
+# Bronze Layer - Query PostgreSQL
 
 Dokumentasi ini menjelaskan enam tabel pada **Bronze Layer** dalam data warehouse.
 
