@@ -1,4 +1,4 @@
-# Bronze Layer — Query dan Dokumentasi PostgreSQL
+# Bronze Layer - Query dan Dokumentasi PostgreSQL
 
 Dokumen ini berisi penjelasan enam tabel Bronze, sumber file CSV, query bulk
 import, validasi data, serta prosedur untuk memantau proses pemuatan.
