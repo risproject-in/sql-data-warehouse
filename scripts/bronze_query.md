@@ -1,7 +1,7 @@
 # Bronze Layer — Query dan Dokumentasi PostgreSQL
 
 Dokumen ini berisi penjelasan enam tabel Bronze, sumber file CSV, query bulk
-import, dan pemeriksaan data setelah proses pemuatan.
+import, validasi data, serta prosedur untuk memantau proses pemuatan.
 
 ## Sumber Data
 
@@ -38,7 +38,7 @@ ERP
 `HEADER TRUE` hanya melewati baris header. Pemetaan data dilakukan berdasarkan
 urutan kolom yang ditulis pada perintah `\copy`.
 
-## Fungsi Enam Tabel
+## Fungsi dan Logic Enam Tabel
 
 ### `bronze.crm_cust_info`
 
@@ -268,6 +268,7 @@ Atau dalam satuan detik:
 SELECT EXTRACT(
     EPOCH FROM (clock_timestamp() - statement_timestamp())
 ) AS duration_seconds;
+```
 
 ## Data Dictionary Bronze Layer
 
@@ -364,4 +365,3 @@ GOLD — STAR SCHEMA
 4. Semua data sumber disimpan apa adanya di Bronze Layer.
 5. Data dibersihkan dan divalidasi di Silver Layer.
 6. Data siap analisis dibentuk menjadi fact dan dimension pada Gold Layer.
-```
