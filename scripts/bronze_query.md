@@ -613,6 +613,23 @@ GOLD — STAR SCHEMA
 └── fact_sales
 ```
 
+## Fitur Wajib Layer Beonze
+
+1. Waktu mulai proses keseluruhan
+2. Tahap proses yang sedang berjalan
+3. Nama tabel yang sedang diproses
+4. Durasi loading setiap tabel
+5. Waktu selesai proses keseluruhan
+6. Total durasi loading seluruh tabel
+7. Status keberhasilan proses
+8. Informasi error
+9. jumlah baris yang berhasil di-import;
+10. jumlah baris yang gagal;
+11. nama file yang digunakan;
+12. user yang menjalankan proses;
+13. status proses disimpan ke tabel log;
+14. waktu mulai dan selesai disimpan ke tabel log.
+
 ## Ringkasan Logic
 
 1. CRM menyediakan data customer, produk, dan transaksi penjualan.
