@@ -1,4 +1,4 @@
-# Bronze Layer - Query dan Dokumentasi PostgreSQL
+# Bronze Layer — Query dan Dokumentasi PostgreSQL
 
 Dokumen ini berisi penjelasan enam tabel Bronze, sumber file CSV, query bulk
 import, validasi data, serta prosedur untuk memantau proses pemuatan.
@@ -191,7 +191,7 @@ WHERE sls_ord_num IS NULL
    OR sls_cust_id IS NULL;
 ```
 
-## Stored Procedure dan Durasi Load
+## Stored Procedure, Logging, dan Durasi Load
 
 PostgreSQL menggunakan `CALL nama_procedure()` untuk menjalankan procedure. Nama
 procedure mengikuti pola:
@@ -208,66 +208,322 @@ silver.load_silver()
 gold.load_gold()
 ```
 
-Perintah `\copy` membaca file dari komputer client sehingga dijalankan melalui
-terminal `psql`. Perintah tersebut tidak ditempatkan langsung di dalam procedure
-PL/pgSQL. Procedure dapat digunakan untuk menjalankan transformasi internal,
-validasi, logging, dan pengukuran durasi setelah data tersedia di tabel Bronze.
+### 1. Tabel Log Permanen
 
-Contoh procedure untuk mencatat durasi proses validasi Bronze:
+Tabel berikut menyimpan waktu proses, tahap, nama tabel, nama file, user, status,
+durasi, jumlah baris, dan informasi error. Berbeda dari `RAISE NOTICE`, data pada
+tabel ini tetap tersedia setelah procedure selesai.
+
+```sql
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+CREATE TABLE IF NOT EXISTS bronze.etl_log (
+    log_id           BIGSERIAL PRIMARY KEY,
+    batch_id         UUID NOT NULL,
+    layer_name       VARCHAR(30) NOT NULL,
+    stage_name       VARCHAR(100) NOT NULL,
+    table_name       VARCHAR(100),
+    file_name        TEXT,
+    status           VARCHAR(20) NOT NULL,
+    start_time       TIMESTAMPTZ NOT NULL,
+    end_time         TIMESTAMPTZ,
+    duration_seconds NUMERIC(18, 3),
+    rows_loaded      BIGINT DEFAULT 0,
+    rows_failed      BIGINT DEFAULT 0,
+    executed_by      VARCHAR(100) NOT NULL,
+    error_state      TEXT,
+    error_message    TEXT,
+
+    CONSTRAINT etl_log_status_check
+        CHECK (status IN ('RUNNING', 'SUCCESS', 'FAILED', 'PARTIAL'))
+);
+```
+
+### 2. Procedure untuk Satu Tabel
+
+Procedure ini mencatat tahap, tabel, file, user, waktu mulai, waktu selesai, durasi,
+jumlah baris yang berhasil dimuat, dan error jika proses gagal.
+
+```sql
+CREATE OR REPLACE PROCEDURE bronze.load_bronze_table(
+    p_batch_id   UUID,
+    p_stage_name TEXT,
+    p_table_name TEXT,
+    p_file_name  TEXT,
+    p_columns    TEXT,
+    p_file_path  TEXT
+)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_start_time    TIMESTAMPTZ := clock_timestamp();
+    v_end_time      TIMESTAMPTZ;
+    v_rows_loaded   BIGINT := 0;
+    v_sql_state     TEXT;
+    v_error_message TEXT;
+BEGIN
+    INSERT INTO bronze.etl_log (
+        batch_id,
+        layer_name,
+        stage_name,
+        table_name,
+        file_name,
+        status,
+        start_time,
+        executed_by
+    )
+    VALUES (
+        p_batch_id,
+        'BRONZE',
+        p_stage_name,
+        p_table_name,
+        p_file_name,
+        'RUNNING',
+        v_start_time,
+        SESSION_USER
+    );
+
+    RAISE NOTICE '[%] Memproses tabel % dari file %',
+        p_stage_name, p_table_name, p_file_name;
+
+    EXECUTE format('TRUNCATE TABLE bronze.%I', p_table_name);
+
+    EXECUTE format(
+        'COPY bronze.%I (%s) FROM %L WITH (FORMAT CSV, HEADER TRUE, DELIMITER '','', QUOTE ''"'', ENCODING ''UTF8'')',
+        p_table_name,
+        p_columns,
+        p_file_path
+    );
+
+    GET DIAGNOSTICS v_rows_loaded = ROW_COUNT;
+    v_end_time := clock_timestamp();
+
+    UPDATE bronze.etl_log
+    SET status = 'SUCCESS',
+        end_time = v_end_time,
+        duration_seconds = EXTRACT(EPOCH FROM (v_end_time - v_start_time)),
+        rows_loaded = v_rows_loaded,
+        rows_failed = 0
+    WHERE batch_id = p_batch_id
+      AND table_name = p_table_name
+      AND status = 'RUNNING';
+
+    RAISE NOTICE '[%] Tabel % selesai: % baris, durasi % detik',
+        p_stage_name,
+        p_table_name,
+        v_rows_loaded,
+        ROUND(EXTRACT(EPOCH FROM (v_end_time - v_start_time))::NUMERIC, 3);
+
+EXCEPTION
+    WHEN OTHERS THEN
+        v_end_time := clock_timestamp();
+
+        GET STACKED DIAGNOSTICS
+            v_sql_state = RETURNED_SQLSTATE,
+            v_error_message = MESSAGE_TEXT;
+
+        -- Exception block melakukan rollback terhadap INSERT RUNNING.
+        -- Karena itu, status FAILED dicatat sebagai baris baru.
+        INSERT INTO bronze.etl_log (
+            batch_id,
+            layer_name,
+            stage_name,
+            table_name,
+            file_name,
+            status,
+            start_time,
+            end_time,
+            duration_seconds,
+            rows_loaded,
+            rows_failed,
+            executed_by,
+            error_state,
+            error_message
+        )
+        VALUES (
+            p_batch_id,
+            'BRONZE',
+            p_stage_name,
+            p_table_name,
+            p_file_name,
+            'FAILED',
+            v_start_time,
+            v_end_time,
+            EXTRACT(EPOCH FROM (v_end_time - v_start_time)),
+            0,
+            1,
+            SESSION_USER,
+            v_sql_state,
+            v_error_message
+        );
+
+        RAISE WARNING '[%] Tabel % gagal: %',
+            p_stage_name, p_table_name, v_error_message;
+END;
+$$;
+```
+
+`rows_failed = 1` pada baris `FAILED` menunjukkan satu proses loading tabel gagal.
+Jumlah baris CSV yang bermasalah secara individual belum dapat diketahui oleh
+`COPY` ketika terjadi error. Jika diperlukan jumlah baris gagal secara detail,
+data harus dimuat ke staging table bertipe teks terlebih dahulu.
+
+### 3. Procedure Utama `bronze.load_bronze`
+
+Procedure utama mencatat waktu dan status batch secara keseluruhan, lalu memanggil
+procedure per tabel. Nama file dan path dapat disesuaikan dengan lokasi dataset.
 
 ```sql
 CREATE OR REPLACE PROCEDURE bronze.load_bronze()
 LANGUAGE plpgsql
 AS $$
 DECLARE
-    v_start_time TIMESTAMP;
-    v_end_time   TIMESTAMP;
-    v_duration   INTERVAL;
+    v_batch_id    UUID := gen_random_uuid();
+    v_batch_start TIMESTAMPTZ := clock_timestamp();
+    v_batch_end   TIMESTAMPTZ;
+    v_failed      BIGINT;
+    v_loaded      BIGINT;
 BEGIN
-    v_start_time := clock_timestamp();
+    RAISE NOTICE '========================================';
+    RAISE NOTICE 'Memulai loading Bronze Layer';
+    RAISE NOTICE 'Batch ID: %', v_batch_id;
+    RAISE NOTICE 'User: %', SESSION_USER;
+    RAISE NOTICE '========================================';
 
-    RAISE NOTICE 'Memulai proses Bronze Layer pada %', v_start_time;
+    CALL bronze.load_bronze_table(
+        v_batch_id,
+        'CRM',
+        'crm_cust_info',
+        'cust_info.csv',
+        'cst_id, cst_key, cst_firstname, cst_lastname, cst_marital_status, cst_gndr, cst_create_date',
+        'D:/Acceleration/datasets/source_crm/cust_info.csv'
+    );
 
-    PERFORM COUNT(*) FROM bronze.crm_cust_info;
-    PERFORM COUNT(*) FROM bronze.crm_prd_info;
-    PERFORM COUNT(*) FROM bronze.crm_sales_details;
-    PERFORM COUNT(*) FROM bronze.erp_cust_az12;
-    PERFORM COUNT(*) FROM bronze.erp_loc_a101;
-    PERFORM COUNT(*) FROM bronze.erp_px_cat_g1v2;
+    CALL bronze.load_bronze_table(
+        v_batch_id,
+        'CRM',
+        'crm_prd_info',
+        'prd.info.csv',
+        'prd_id, prd_key, prd_nm, prd_cost, prd_line, prd_start_dt, prd_end_dt',
+        'D:/Acceleration/datasets/source_crm/prd.info.csv'
+    );
 
-    v_end_time := clock_timestamp();
-    v_duration := v_end_time - v_start_time;
+    CALL bronze.load_bronze_table(
+        v_batch_id,
+        'CRM',
+        'crm_sales_details',
+        'sales_details.csv',
+        'sls_ord_num, sls_prd_key, sls_cust_id, sls_order_dt, sls_ship_dt, sls_due_dt, sls_sales, sls_quantity, sls_price',
+        'D:/Acceleration/datasets/source_crm/sales_details.csv'
+    );
 
-    RAISE NOTICE 'Bronze Layer selesai pada %', v_end_time;
-    RAISE NOTICE 'Durasi proses: %', v_duration;
+    CALL bronze.load_bronze_table(
+        v_batch_id,
+        'ERP',
+        'erp_cust_az12',
+        'CUST_AZ12.csv',
+        'cid, bdate, gen',
+        'D:/Acceleration/datasets/source_erp/CUST_AZ12.csv'
+    );
 
-EXCEPTION
-    WHEN OTHERS THEN
-        RAISE WARNING 'Load Bronze gagal: %', SQLERRM;
-        RAISE;
+    CALL bronze.load_bronze_table(
+        v_batch_id,
+        'ERP',
+        'erp_loc_a101',
+        'LOC_A101.csv',
+        'cid, cntry',
+        'D:/Acceleration/datasets/source_erp/LOC_A101.csv'
+    );
+
+    CALL bronze.load_bronze_table(
+        v_batch_id,
+        'ERP',
+        'erp_px_cat_g1v2',
+        'PX_CAT_G1V2.csv',
+        'id, cat, subcat, maintenance',
+        'D:/Acceleration/datasets/source_erp/PX_CAT_G1V2.csv'
+    );
+
+    v_batch_end := clock_timestamp();
+
+    SELECT COUNT(*) FILTER (WHERE status = 'FAILED'),
+           COALESCE(SUM(rows_loaded), 0)
+    INTO v_failed, v_loaded
+    FROM bronze.etl_log
+    WHERE batch_id = v_batch_id;
+
+    INSERT INTO bronze.etl_log (
+        batch_id,
+        layer_name,
+        stage_name,
+        table_name,
+        status,
+        start_time,
+        end_time,
+        duration_seconds,
+        rows_loaded,
+        rows_failed,
+        executed_by
+    )
+    VALUES (
+        v_batch_id,
+        'BRONZE',
+        'WHOLE_BATCH',
+        NULL,
+        CASE WHEN v_failed = 0 THEN 'SUCCESS' ELSE 'PARTIAL' END,
+        v_batch_start,
+        v_batch_end,
+        EXTRACT(EPOCH FROM (v_batch_end - v_batch_start)),
+        v_loaded,
+        v_failed,
+        SESSION_USER
+    );
+
+    RAISE NOTICE 'Loading Bronze Layer selesai';
+    RAISE NOTICE 'Total baris berhasil: %', v_loaded;
+    RAISE NOTICE 'Total tabel gagal: %', v_failed;
+    RAISE NOTICE 'Total durasi: % detik',
+        ROUND(EXTRACT(EPOCH FROM (v_batch_end - v_batch_start))::NUMERIC, 3);
 END;
 $$;
 ```
 
-Jalankan procedure dengan:
+### 4. Menjalankan Procedure
 
 ```sql
 CALL bronze.load_bronze();
 ```
 
-PostgreSQL tidak memiliki fungsi `DATEDIFF()` seperti SQL Server. Durasi dapat
-dihitung menggunakan pengurangan timestamp:
+> `COPY` pada procedure membaca file dari sisi server PostgreSQL. Jika service
+> PostgreSQL tidak dapat mengakses drive `D:`, gunakan query `\copy` pada bagian
+> Bulk Import dan lakukan pencatatan log melalui wrapper `psql`.
+
+### 5. Melihat Log Proses
 
 ```sql
-SELECT clock_timestamp() - statement_timestamp() AS duration;
+SELECT
+    batch_id,
+    stage_name,
+    table_name,
+    file_name,
+    status,
+    start_time,
+    end_time,
+    duration_seconds,
+    rows_loaded,
+    rows_failed,
+    executed_by,
+    error_state,
+    error_message
+FROM bronze.etl_log
+ORDER BY log_id DESC;
 ```
 
-Atau dalam satuan detik:
+PostgreSQL tidak memiliki fungsi `DATEDIFF()` seperti SQL Server. Durasi sudah
+dicatat menggunakan:
 
 ```sql
-SELECT EXTRACT(
-    EPOCH FROM (clock_timestamp() - statement_timestamp())
-) AS duration_seconds;
+EXTRACT(EPOCH FROM (end_time - start_time))
 ```
 
 ## Data Dictionary Bronze Layer
