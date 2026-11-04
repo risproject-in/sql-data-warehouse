@@ -613,7 +613,7 @@ GOLD — STAR SCHEMA
 └── fact_sales
 ```
 
-## Fitur Wajib Layer Beonze
+## Fitur Wajib Layer Bronze
 
 1. Waktu mulai proses keseluruhan
 2. Tahap proses yang sedang berjalan
